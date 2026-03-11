@@ -32,7 +32,7 @@ nvidia-smi topo -p2p r
 numactl --hardware
 
 # 5. 检查当前目录
-pwd  # 应该在 numa_allreduce_package/ 目录
+pwd  # 应该在 numa_allreduce/ 目录
 ls -la src/numa_all_reduce.cu       # 确认文件存在
 ls -la tests/test_numa_all_reduce.py  # 确认测试文件存在
 ```
@@ -52,7 +52,7 @@ GPU capability: (8, 0)  # Ampere 架构
 ### 步骤 1: 进入目录并添加到 PYTHONPATH
 
 ```bash
-cd /path/to/numa_allreduce_package
+cd /path/to/numa_allreduce
 export PYTHONPATH="$PWD/src:$PYTHONPATH"
 ```
 
@@ -71,7 +71,7 @@ python -c "import numa_all_reduce; import numa_utils; print('✅ All imports OK'
 
 ```bash
 # 进入目录
-cd /path/to/numa_allreduce_package
+cd /path/to/numa_allreduce
 export PYTHONPATH="$PWD/src:$PYTHONPATH"
 
 # 设置 pytest 输出更详细
@@ -425,7 +425,7 @@ python benchmark_numa.py --world_size 4 --iterations 20 --warmup 5
 
 ```bash
 # ========== 阶段 1: 进入目录并设置环境 ==========
-cd /path/to/numa_allreduce_package
+cd /path/to/numa_allreduce
 export PYTHONPATH="$PWD/src:$PYTHONPATH"
 
 echo "=== Checking Environment ==="
@@ -474,7 +474,7 @@ python examples/numa_allreduce_demo.py --world_size 8
 
 ```bash
 # 确保在正确的目录
-cd /path/to/numa_allreduce_package
+cd /path/to/numa_allreduce
 
 # 添加 src 目录到 PYTHONPATH
 export PYTHONPATH="$PWD/src:$PYTHONPATH"
