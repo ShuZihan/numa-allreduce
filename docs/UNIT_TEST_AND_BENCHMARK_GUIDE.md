@@ -7,10 +7,12 @@
 ## 目录
 
 1. [前提条件检查](#前提条件检查)
-2. [快速开始](#快速开始)
-3. [单元测试](#单元测试)
-4. [性能比对测试](#性能比对测试)
-5. [快速开始命令](#快速开始命令)
+2. [编译 CUDA 算子](#编译-cuda-算子)
+3. [快速开始](#快速开始)
+4. [单元测试](#单元测试)
+5. [性能比对测试](#性能比对测试)
+6. [NSys / NCU 性能采集](#nsys--ncu-性能采集)
+7. [快速开始命令](#快速开始命令)
 
 ---
 
@@ -32,7 +34,7 @@ nvidia-smi topo -p2p r
 numactl --hardware
 
 # 5. 检查当前目录
-pwd  # 应该在 numa_allreduce/ 目录
+pwd  # 应该在 numa-allreduce/ 目录
 ls -la src/numa_all_reduce.cu       # 确认文件存在
 ls -la tests/test_numa_all_reduce.py  # 确认测试文件存在
 ```
@@ -47,12 +49,89 @@ GPU capability: (8, 0)  # Ampere 架构
 
 ---
 
+## 编译 CUDA 算子
+
+NUMA AllReduce 的 CUDA 算子需要编译后才能使用。有两种方式：
+
+### 方式一：在 vLLM 源码树中编译（推荐）
+
+如果您是在 vLLM 源码树中工作，算子会随 vLLM 一起编译：
+
+```bash
+# 进入 vLLM 源码根目录
+cd /path/to/vllm
+
+# 编译 vLLM（包含 custom_all_reduce 算子）
+pip install -e .
+
+# 或者仅编译 C++ 扩展（更快）
+python setup.py build_ext --inplace
+```
+
+vLLM 的 `setup.py` 会自动编译 `csrc/custom_all_reduce.cu` 并生成 `vllm._C` 扩展模块。
+
+### 方式二：独立编译（仅用于单元测试）
+
+如果您想在独立的 numa-allreduce 仓库中编译，可以创建一个简单的 `setup.py`：
+
+```bash
+cd /path/to/numa-allreduce
+
+# 创建临时 setup.py
+cat > setup.py << 'EOF'
+from setuptools import setup, Extension
+from torch.utils import cpp_extension
+
+setup(
+    name="numa_allreduce_ops",
+    ext_modules=[
+        cpp_extension.CUDAExtension(
+            "numa_allreduce_ops",
+            ["src/numa_all_reduce.cu"],
+        )
+    ],
+    cmdclass={"build_ext": cpp_extension.BuildExtension},
+)
+EOF
+
+# 编译
+python setup.py build_ext --inplace
+```
+
+### 验证编译成功
+
+```bash
+# 检查是否可以导入 custom ops
+python -c "
+try:
+    import vllm._custom_ops as ops
+    print('✅ vLLM custom ops imported successfully')
+    print(f'   meta_size() available: {hasattr(ops, \"meta_size\")}')
+except ImportError as e:
+    print(f'❌ Import failed: {e}')
+    print('   Please compile vLLM first.')
+"
+```
+
+### 编译依赖
+
+- CUDA Toolkit >= 11.8
+- PyTorch with CUDA support
+- CMake >= 3.26
+- Ninja build system
+
+**注意**：对于 BF16 支持，需要：
+- CUDA 架构 >= 8.0 (Ampere or later)
+- 在编译时会自动检测并启用 BF16 支持
+
+---
+
 ## 快速开始
 
 ### 步骤 1: 进入目录并添加到 PYTHONPATH
 
 ```bash
-cd /path/to/numa_allreduce
+cd /path/to/numa-allreduce
 export PYTHONPATH="$PWD/src:$PYTHONPATH"
 ```
 
@@ -71,7 +150,7 @@ python -c "import numa_all_reduce; import numa_utils; print('✅ All imports OK'
 
 ```bash
 # 进入目录
-cd /path/to/numa_allreduce
+cd /path/to/numa-allreduce
 export PYTHONPATH="$PWD/src:$PYTHONPATH"
 
 # 设置 pytest 输出更详细
@@ -424,26 +503,46 @@ python benchmark_numa.py --world_size 4 --iterations 20 --warmup 5
 ### TL;DR: 完整测试流程（复制粘贴即可）
 
 ```bash
-# ========== 阶段 1: 进入目录并设置环境 ==========
-cd /path/to/numa_allreduce
+# ========== 阶段 1: 编译 vLLM（包含 CUDA 算子） ==========
+# 如果还没编译 vLLM，先进入 vLLM 源码目录编译
+cd /path/to/vllm
+pip install -e .
+# 或者更快的方式，仅编译扩展
+python setup.py build_ext --inplace
+
+# ========== 阶段 2: 进入 numa-allreduce 目录并设置环境 ==========
+cd /path/to/numa-allreduce
 export PYTHONPATH="$PWD/src:$PYTHONPATH"
 
 echo "=== Checking Environment ==="
 python -c "import torch; print('CUDA:', torch.cuda.is_available(), 'GPUs:', torch.cuda.device_count())"
 
-# ========== 阶段 2: 验证导入 ==========
+# ========== 阶段 3: 验证 custom ops 编译成功 ==========
+echo -e "\n=== Verifying Custom Ops ==="
+python -c "
+try:
+    import vllm._custom_ops as ops
+    print('✅ vLLM custom ops imported successfully')
+except ImportError as e:
+    print(f'❌ Import failed: {e}')
+    print('   Please compile vLLM first.')
+    import sys
+    sys.exit(1)
+"
+
+# ========== 阶段 4: 验证导入 ==========
 echo -e "\n=== Verifying Imports ==="
 python -c "import numa_all_reduce; import numa_utils; print('✅ All imports OK')"
 
-# ========== 阶段 3: 运行单元测试 ==========
+# ========== 阶段 5: 运行单元测试 ==========
 echo -e "\n=== Running Unit Tests ==="
 pytest tests/test_numa_all_reduce.py::TestNumaAllReduceCorrectness -v -s
 
-# ========== 阶段 4: 运行性能比对 (TP4) ==========
+# ========== 阶段 6: 运行性能比对 (TP4) ==========
 echo -e "\n=== Running Performance Benchmark (TP4) ==="
 python examples/numa_allreduce_demo.py --world_size 4 --no-correctness
 
-# ========== 阶段 5: 运行性能比对 (TP8) ==========
+# ========== 阶段 7: 运行性能比对 (TP8) ==========
 echo -e "\n=== Running Performance Benchmark (TP8) ==="
 python examples/numa_allreduce_demo.py --world_size 8 --no-correctness
 ```
@@ -468,13 +567,80 @@ python examples/numa_allreduce_demo.py --world_size 8
 
 ---
 
+## NSys / NCU 性能采集
+
+如需使用 NVIDIA Nsight Systems (NSys) 和 Nsight Compute (NCU) 进行深度性能分析，
+请参考专门的性能采集指南：
+
+**[PROFILING_GUIDE.md](./PROFILING_GUIDE.md)** - 完整的 NSys/NCU 性能采集指南
+
+### 快速开始
+
+```bash
+cd /path/to/numa-allreduce
+export PYTHONPATH="$PWD/src:$PYTHONPATH"
+
+# 1. 快速基准测试（不使用 profiler）
+python examples/profile_nsys_ncu.py --world_size 4 --mode benchmark --size_mb 256
+
+# 2. 使用 NSys 采集系统级性能
+nsys profile -w true -t cuda,nvtx,osrt --cudabacktrace=true \
+    -o numa_profile_tp4 \
+    python examples/profile_nsys_ncu.py --world_size 4 --mode nsys --size_mb 256
+
+# 查看 NSys 结果
+nsys-ui numa_profile_tp4.qdrep
+
+# 3. 使用 NCU 采集 Kernel 级性能
+ncu --set full -o ncu_profile_tp4 \
+    python examples/profile_nsys_ncu.py --world_size 4 --mode ncu --size_mb 256
+```
+
+### 性能采集脚本
+
+提供了专门的性能采集脚本 `examples/profile_nsys_ncu.py`，支持三种模式：
+
+| 模式 | 说明 |
+|------|------|
+| `benchmark` | 仅运行基准测试，输出性能对比 |
+| `nsys` | 为 NSys 采集添加 NVTX markers |
+| `ncu` | 为 NCU 采集运行 Kernel 迭代 |
+
+详细说明请参考 [PROFILING_GUIDE.md](./PROFILING_GUIDE.md)。
+
+---
+
 ## 常见问题排查
+
+### 问题 0: custom ops 未编译
+
+```
+ImportError: No module named 'vllm._custom_ops'
+```
+
+**解决方案**：
+
+```bash
+# 进入 vLLM 源码目录
+cd /path/to/vllm
+
+# 编译 vLLM
+pip install -e .
+
+# 或者仅编译 C++ 扩展
+python setup.py build_ext --inplace
+```
+
+验证：
+```bash
+python -c "import vllm._custom_ops as ops; print('OK')"
+```
 
 ### 问题 1: 导入错误 "No module named 'numa_all_reduce'"
 
 ```bash
 # 确保在正确的目录
-cd /path/to/numa_allreduce
+cd /path/to/numa-allreduce
 
 # 添加 src 目录到 PYTHONPATH
 export PYTHONPATH="$PWD/src:$PYTHONPATH"

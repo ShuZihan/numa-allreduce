@@ -8,7 +8,7 @@
 
 ```bash
 # 1. 进入目录
-cd numa_allreduce
+cd numa-allreduce
 export PYTHONPATH="$PWD/src:$PYTHONPATH"
 
 # 2. 运行演示（4卡）
@@ -23,7 +23,7 @@ pytest tests/test_numa_all_reduce.py -v
 ## 📁 目录结构
 
 ```
-numa_allreduce/
+numa-allreduce/
 ├── README.md                    # 本文件（快速开始）
 ├── src/                         # 源代码
 │   ├── __init__.py
