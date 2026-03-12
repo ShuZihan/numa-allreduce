@@ -51,51 +51,29 @@ GPU capability: (8, 0)  # Ampere 架构
 
 ## 编译 CUDA 算子
 
-NUMA AllReduce 的 CUDA 算子需要编译后才能使用。有两种方式：
+NUMA AllReduce 的 CUDA 算子需要编译后才能使用。
 
-### 方式一：在 vLLM 源码树中编译（推荐）
+### 方式一：独立编译 CUDA 算子（推荐）
 
-如果您是在 vLLM 源码树中工作，算子会随 vLLM 一起编译：
+这是推荐方式，仅编译 NUMA AllReduce 所需的 CUDA 算子，不需要完整安装 vLLM：
 
 ```bash
 # 进入 vLLM 源码根目录
 cd /path/to/vllm
 
-# 编译 vLLM（包含 custom_all_reduce 算子）
-pip install -e .
-
-# 或者仅编译 C++ 扩展（更快）
+# 独立编译 C++ 扩展（仅编译 CUDA 算子，不安装 vLLM）
 python setup.py build_ext --inplace
 ```
 
-vLLM 的 `setup.py` 会自动编译 `csrc/custom_all_reduce.cu` 并生成 `vllm._C` 扩展模块。
+编译完成后，会在 vllm 目录下生成 `_C.*.so` 扩展模块。这就足够用于单元测试和性能比对了。
 
-### 方式二：独立编译（仅用于单元测试）
+### 方式二：完整安装 vLLM
 
-如果您想在独立的 numa-allreduce 仓库中编译，可以创建一个简单的 `setup.py`：
+如果您同时需要使用 vLLM 的其他功能：
 
 ```bash
-cd /path/to/numa-allreduce
-
-# 创建临时 setup.py
-cat > setup.py << 'EOF'
-from setuptools import setup, Extension
-from torch.utils import cpp_extension
-
-setup(
-    name="numa_allreduce_ops",
-    ext_modules=[
-        cpp_extension.CUDAExtension(
-            "numa_allreduce_ops",
-            ["src/numa_all_reduce.cu"],
-        )
-    ],
-    cmdclass={"build_ext": cpp_extension.BuildExtension},
-)
-EOF
-
-# 编译
-python setup.py build_ext --inplace
+cd /path/to/vllm
+pip install -e .
 ```
 
 ### 验证编译成功
@@ -109,7 +87,9 @@ try:
     print(f'   meta_size() available: {hasattr(ops, \"meta_size\")}')
 except ImportError as e:
     print(f'❌ Import failed: {e}')
-    print('   Please compile vLLM first.')
+    print('   Please compile first (see above).')
+    import sys
+    sys.exit(1)
 "
 ```
 
@@ -503,11 +483,12 @@ python benchmark_numa.py --world_size 4 --iterations 20 --warmup 5
 ### TL;DR: 完整测试流程（复制粘贴即可）
 
 ```bash
-# ========== 阶段 1: 编译 vLLM（包含 CUDA 算子） ==========
-# 如果还没编译 vLLM，先进入 vLLM 源码目录编译
+# ========== 阶段 1: 编译 CUDA 算子（独立编译，推荐） ==========
+# 进入 vLLM 源码根目录
 cd /path/to/vllm
-pip install -e .
-# 或者更快的方式，仅编译扩展
+
+echo "=== Building CUDA Operators ==="
+# 独立编译 C++ 扩展（仅编译 CUDA 算子，不安装 vLLM）
 python setup.py build_ext --inplace
 
 # ========== 阶段 2: 进入 numa-allreduce 目录并设置环境 ==========
@@ -525,7 +506,7 @@ try:
     print('✅ vLLM custom ops imported successfully')
 except ImportError as e:
     print(f'❌ Import failed: {e}')
-    print('   Please compile vLLM first.')
+    print('   Please compile first.')
     import sys
     sys.exit(1)
 "
@@ -618,17 +599,24 @@ ncu --set full -o ncu_profile_tp4 \
 ImportError: No module named 'vllm._custom_ops'
 ```
 
-**解决方案**：
+**解决方案（推荐独立编译）**：
 
 ```bash
 # 进入 vLLM 源码目录
 cd /path/to/vllm
 
-# 编译 vLLM
-pip install -e .
-
-# 或者仅编译 C++ 扩展
+# 独立编译 C++ 扩展（仅编译 CUDA 算子）
 python setup.py build_ext --inplace
+```
+
+**备选方案（完整安装 vLLM）**：
+
+```bash
+# 进入 vLLM 源码目录
+cd /path/to/vllm
+
+# 完整编译 vLLM
+pip install -e .
 ```
 
 验证：
